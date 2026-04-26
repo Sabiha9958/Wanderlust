@@ -30,15 +30,11 @@ exports.validateUser = [
  * ✅ Booking validation rules
  */
 exports.validateBooking = [
-  body("listingId").notEmpty().withMessage("Listing ID is required"),
-  body("userId").notEmpty().withMessage("User ID is required"),
-  body("checkInDate")
-    .isISO8601()
-    .toDate()
-    .withMessage("Valid check-in date is required"),
-  body("checkOutDate")
-    .isISO8601()
-    .toDate()
-    .withMessage("Valid check-out date is required"),
+  body("property").isMongoId().withMessage("Invalid property ID"),
+
+  body("checkIn").isISO8601().toDate().withMessage("Invalid check-in date"),
+
+  body("checkOut").isISO8601().toDate().withMessage("Invalid check-out date"),
+
   body("guests").isInt({ min: 1 }).withMessage("Guests must be at least 1"),
 ];

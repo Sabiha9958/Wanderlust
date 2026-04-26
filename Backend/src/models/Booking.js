@@ -2,64 +2,120 @@ const mongoose = require("mongoose");
 
 const bookingSchema = new mongoose.Schema(
   {
-    user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    // who booked (customer)
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+
+    // listing
     property: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Listing",
       required: true,
+      index: true,
     },
+
+    // dates
     checkIn: { type: Date, required: true },
     checkOut: {
       type: Date,
       required: true,
       validate: {
-        validator(value) {
-          return value > this.checkIn;
+        validator(val) {
+          return this.checkIn && val > this.checkIn;
         },
-        message: "Check-out date must be after check-in date",
+        message: "Check-out must be after check-in",
       },
     },
-    guests: { type: Number, required: true, min: 1, max: 10 },
-    totalPrice: { type: Number, min: 0, default: 0 },
+
+    guests: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+
+    // pricing
+    pricePerNight: { type: Number, required: true },
+    totalPrice: { type: Number, required: true },
+
+    // lifecycle
     status: {
       type: String,
-      enum: ["pending", "confirmed", "checked-in", "cancelled", "completed"],
+      enum: ["pending", "confirmed", "checked-in", "completed", "cancelled"],
       default: "pending",
+      index: true,
     },
+
     paymentStatus: {
       type: String,
-      enum: ["unpaid", "partially-paid", "paid", "refunded"],
+      enum: ["unpaid", "paid", "refunded", "partially-paid"],
       default: "unpaid",
     },
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+
+    // audit (admin control)
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+
     cancelledAt: Date,
-    cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    cancelledBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
   },
   { timestamps: true },
 );
 
-// Helper: calculate total price
-async function calculateTotalPrice(booking) {
+/* ---------------- OVERLAP PREVENTION ---------------- */
+bookingSchema.statics.isAvailable = async function (
+  property,
+  checkIn,
+  checkOut,
+) {
+  const conflict = await this.findOne({
+    property,
+    status: { $ne: "cancelled" },
+
+    // ✅ CORRECT overlap logic
+    checkIn: { $lt: checkOut },
+    checkOut: { $gt: checkIn },
+  });
+
+  return !conflict;
+};
+
+/* ---------------- PRICE CALC ---------------- */
+bookingSchema.pre("validate", async function () {
+  if (!this.isModified("checkIn") && !this.isModified("checkOut")) {
+    return;
+  }
+
   const Listing = mongoose.model("Listing");
-  const property = await Listing.findById(booking.property).lean();
-  if (!property || !property.price)
-    throw new Error("Listing or price not found");
+  const listing = await Listing.findById(this.property).lean();
+
+  if (!listing) {
+    throw new Error("Listing not found");
+  }
 
   const nights = Math.ceil(
-    (booking.checkOut - booking.checkIn) / (1000 * 60 * 60 * 24),
+    (this.checkOut - this.checkIn) / (1000 * 60 * 60 * 24),
   );
-  return nights * property.price;
-}
 
-// Pre-save hook
-bookingSchema.pre("save", async function () {
-  if (
-    this.isModified("checkIn") ||
-    this.isModified("checkOut") ||
-    this.isModified("property")
-  ) {
-    this.totalPrice = await calculateTotalPrice(this);
+  if (nights <= 0) {
+    throw new Error("Invalid booking duration");
   }
+
+  this.pricePerNight = listing.price;
+  this.totalPrice = nights * listing.price;
 });
 
 module.exports = mongoose.model("Booking", bookingSchema);

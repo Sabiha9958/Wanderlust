@@ -1,6 +1,7 @@
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
+const { getIO } = require("../socket/socket");
 
 /* ---------- Helpers ---------- */
 
@@ -114,11 +115,19 @@ exports.createUser = async (req, res, next) => {
 
     const user = await User.create(payload);
 
-    res.status(201).json({
+    const io = getIO();
+    io.emit("dashboard:update", {
+      type: "USER_CREATED",
+      data: user,
+    });
+
+    return res.status(201).json({
       success: true,
+      message: "User created successfully",
       data: sanitizeUser(user.toObject()),
     });
   } catch (error) {
+    console.error("User creation error:", error.message);
     next(error);
   }
 };

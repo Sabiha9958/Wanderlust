@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Review = require("../models/Review");
 const Listing = require("../models/Listing");
 const User = require("../models/User");
+const { getIO } = require("../socket/socket");
 
 // Create review
 exports.createReview = async (req, res, next) => {
@@ -9,26 +10,32 @@ exports.createReview = async (req, res, next) => {
     const { listingId, rating, comment } = req.body;
     const userId = req.user?.id;
 
-    if (!userId)
+    if (!userId) {
       return res.status(401).json({ success: false, message: "Unauthorized" });
-    if (!mongoose.Types.ObjectId.isValid(listingId))
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(listingId)) {
       return res
         .status(400)
         .json({ success: false, message: "Invalid listing ID" });
+    }
 
     const listing = await Listing.findById(listingId);
-    if (!listing)
+    if (!listing) {
       return res
         .status(404)
         .json({ success: false, message: "Listing not found" });
+    }
 
-    const existing = await Review.findOne({ listingId, userId });
-    if (existing)
+    const existingReview = await Review.findOne({ listingId, userId });
+    if (existingReview) {
       return res
         .status(400)
         .json({ success: false, message: "You already reviewed this listing" });
+    }
 
     const user = await User.findById(userId).select("name");
+
     const review = await Review.create({
       listingId,
       userId,
@@ -37,14 +44,19 @@ exports.createReview = async (req, res, next) => {
       comment,
     });
 
-    res
-      .status(201)
-      .json({
-        success: true,
-        message: "Review created successfully",
-        data: review,
-      });
+    const io = getIO();
+    io.emit("dashboard:update", {
+      type: "REVIEW_CREATED",
+      data: review,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Review created successfully",
+      data: review,
+    });
   } catch (error) {
+    console.error("Review creation error:", error.message);
     next(error);
   }
 };
@@ -115,13 +127,11 @@ exports.updateReview = async (req, res, next) => {
     review.comment = req.body.comment ?? review.comment;
     await review.save();
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "Review updated successfully",
-        data: review,
-      });
+    res.status(200).json({
+      success: true,
+      message: "Review updated successfully",
+      data: review,
+    });
   } catch (error) {
     next(error);
   }

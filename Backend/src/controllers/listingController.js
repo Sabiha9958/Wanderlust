@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const Listing = require("../models/Listing");
+const { getIO } = require("../socket/socket");
 
 /* ----------------------------- Utility Responses ----------------------------- */
 const response = {
@@ -98,6 +99,12 @@ exports.createListing = async (req, res) => {
     };
 
     const listing = await Listing.create(payload);
+
+    const io = getIO();
+    io.emit("dashboard:update", {
+      type: "LISTING_CREATED",
+      data: listing,
+    });
 
     res.status(201).json({
       success: true,

@@ -1,44 +1,66 @@
-const Listing = require("../models/Listing");
+const mongoose = require("mongoose");
 const Booking = require("../models/Booking");
-const { calculateTotalPrice } = require("../utils/bookingUtils");
+const Listing = require("../models/Listing");
+const { getIO } = require("../socket/socket");
 
-// Helper: standard error response
-const handleError = (res, error, status = 500) => {
-  res.status(status).json({ success: false, message: error.message || error });
-};
-
-// Create booking
 exports.createBooking = async (req, res, next) => {
   try {
-    const { listingId, checkInDate, checkOutDate, guests, userId } = req.body;
+    const { property, checkIn, checkOut, guests } = req.body;
 
-    const property = await Listing.findById(listingId);
-    if (!property) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Listing not found" });
+    if (!mongoose.Types.ObjectId.isValid(property)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid property ID",
+      });
     }
 
-    const totalPrice = calculateTotalPrice({
-      price: property.price,
-      checkIn: checkInDate,
-      checkOut: checkOutDate,
-      guests,
-    });
+    const listing = await Listing.findById(property);
+    if (!listing) {
+      return res.status(404).json({
+        success: false,
+        message: "Listing not found",
+      });
+    }
+
+    const start = new Date(checkIn);
+    const end = new Date(checkOut);
+
+    if (end <= start) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid date range",
+      });
+    }
+
+    const isAvailable = await Booking.isAvailable(property, start, end);
+
+    if (!isAvailable) {
+      return res.status(409).json({
+        success: false,
+        message: "Dates not available",
+      });
+    }
 
     const booking = await Booking.create({
-      user: userId,
-      property: listingId,
-      checkIn: checkInDate,
-      checkOut: checkOutDate,
+      user: req.user.id,
+      property,
+      checkIn: start,
+      checkOut: end,
       guests,
-      totalPrice,
-      createdBy: req.user?._id,
+      createdBy: req.user.id,
     });
 
-    res.status(201).json({ success: true, data: booking });
-  } catch (error) {
-    handleError(res, error);
+    getIO().emit("dashboard:update", {
+      type: "BOOKING_CREATED",
+      data: booking,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: booking,
+    });
+  } catch (err) {
+    next(err);
   }
 };
 
@@ -116,7 +138,7 @@ exports.cancelBooking = async (req, res, next) => {
       {
         status: "cancelled",
         cancelledAt: new Date(),
-        cancelledBy: req.user?._id,
+        cancelledBy: req.user?.id,
       },
       { new: true, runValidators: true },
     )

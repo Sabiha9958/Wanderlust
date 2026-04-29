@@ -4,166 +4,181 @@ const Listing = require("../models/Listing");
 const User = require("../models/User");
 const { getIO } = require("../socket/socket");
 
-// Create review
+/* ---------- HELPERS ---------- */
+
+const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
+
+const sendError = (res, status, message) => {
+  return res.status(status).json({
+    success: false,
+    message,
+  });
+};
+
+const sendSuccess = (res, status, data, extra = {}) => {
+  return res.status(status).json({
+    success: true,
+    data,
+    ...extra,
+  });
+};
+
+/* ---------- CREATE REVIEW ---------- */
+
 exports.createReview = async (req, res, next) => {
   try {
-    const { listingId, rating, comment } = req.body;
-    const userId = req.user?.id;
+    const { listing, rating, comment } = req.body;
+    const userId = req.user.id;
 
-    if (!userId) {
-      return res.status(401).json({ success: false, message: "Unauthorized" });
+    if (!listing || !isValidId(listing)) {
+      return sendError(res, 400, "Valid listing ID required");
     }
 
-    if (!mongoose.Types.ObjectId.isValid(listingId)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid listing ID" });
+    if (!rating || rating < 1 || rating > 5) {
+      return sendError(res, 400, "Rating must be between 1 and 5");
     }
 
-    const listing = await Listing.findById(listingId);
-    if (!listing) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Listing not found" });
+    const listingExists = await Listing.exists({ _id: listing });
+    if (!listingExists) {
+      return sendError(res, 404, "Listing not found");
     }
 
-    const existingReview = await Review.findOne({ listingId, userId });
-    if (existingReview) {
-      return res
-        .status(400)
-        .json({ success: false, message: "You already reviewed this listing" });
+    const alreadyReviewed = await Review.exists({
+      listing,
+      user: userId,
+    });
+
+    if (alreadyReviewed) {
+      return sendError(res, 400, "You already reviewed this listing");
     }
 
-    const user = await User.findById(userId).select("name");
+    const user = await User.findById(userId).select("name").lean();
 
     const review = await Review.create({
-      listingId,
-      userId,
+      listing,
+      user: userId,
       userName: user?.name || "Anonymous",
       rating,
       comment,
     });
 
-    const io = getIO();
-    io.emit("dashboard:update", {
+    getIO()?.emit("dashboard:update", {
       type: "REVIEW_CREATED",
       data: review,
     });
 
-    return res.status(201).json({
-      success: true,
-      message: "Review created successfully",
-      data: review,
-    });
-  } catch (error) {
-    console.error("Review creation error:", error.message);
-    next(error);
+    return sendSuccess(res, 201, review);
+  } catch (err) {
+    next(err);
   }
 };
 
-// Get reviews by listing
+/* ---------- GET REVIEWS BY LISTING ---------- */
+
 exports.getReviewsByListing = async (req, res, next) => {
   try {
     const { listingId } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(listingId))
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid listing ID" });
 
-    const reviews = await Review.find({ listingId }).sort({ createdAt: -1 });
-    res
-      .status(200)
-      .json({ success: true, count: reviews.length, data: reviews });
-  } catch (error) {
-    next(error);
+    if (!isValidId(listingId)) {
+      return sendError(res, 400, "Invalid listing ID");
+    }
+
+    const reviews = await Review.find({ listing: listingId })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return sendSuccess(res, 200, reviews, {
+      count: reviews.length,
+    });
+  } catch (err) {
+    next(err);
   }
 };
 
-// Get single review
+/* ---------- GET SINGLE REVIEW ---------- */
+
 exports.getReview = async (req, res, next) => {
   try {
     const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid review ID" });
+
+    if (!isValidId(id)) {
+      return sendError(res, 400, "Invalid review ID");
     }
 
-    const review = await Review.findById(id);
-    if (!review)
-      return res
-        .status(404)
-        .json({ success: false, message: "Review not found" });
+    const review = await Review.findById(id).lean();
 
-    res.status(200).json({ success: true, data: review });
-  } catch (error) {
-    next(error);
+    if (!review) {
+      return sendError(res, 404, "Review not found");
+    }
+
+    return sendSuccess(res, 200, review);
+  } catch (err) {
+    next(err);
   }
 };
 
-// Update review
+/* ---------- UPDATE REVIEW ---------- */
+
 exports.updateReview = async (req, res, next) => {
   try {
     const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid review ID" });
+
+    if (!isValidId(id)) {
+      return sendError(res, 400, "Invalid review ID");
     }
 
     const review = await Review.findById(id);
-    if (!review)
-      return res
-        .status(404)
-        .json({ success: false, message: "Review not found" });
 
-    if (review.userId.toString() !== req.user.id) {
-      return res
-        .status(403)
-        .json({ success: false, message: "Not authorized" });
+    if (!review) {
+      return sendError(res, 404, "Review not found");
     }
 
-    review.rating = req.body.rating ?? review.rating;
-    review.comment = req.body.comment ?? review.comment;
+    if (review.user.toString() !== req.user.id) {
+      return sendError(res, 403, "Not authorized to update this review");
+    }
+
+    const { rating, comment } = req.body;
+
+    if (rating !== undefined) review.rating = rating;
+    if (comment !== undefined) review.comment = comment;
+
     await review.save();
 
-    res.status(200).json({
-      success: true,
-      message: "Review updated successfully",
-      data: review,
-    });
-  } catch (error) {
-    next(error);
+    return sendSuccess(res, 200, review);
+  } catch (err) {
+    next(err);
   }
 };
 
-// Delete review
+/* ---------- DELETE REVIEW ---------- */
+
 exports.deleteReview = async (req, res, next) => {
   try {
     const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid review ID" });
+
+    if (!isValidId(id)) {
+      return sendError(res, 400, "Invalid review ID");
     }
 
     const review = await Review.findById(id);
-    if (!review)
-      return res
-        .status(404)
-        .json({ success: false, message: "Review not found" });
 
-    if (review.userId.toString() !== req.user.id && req.user.role !== "admin") {
-      return res
-        .status(403)
-        .json({ success: false, message: "Not authorized" });
+    if (!review) {
+      return sendError(res, 404, "Review not found");
+    }
+
+    const isOwner = review.user.toString() === req.user.id;
+    const isAdmin = req.user.role === "admin";
+
+    if (!isOwner && !isAdmin) {
+      return sendError(res, 403, "Not authorized to delete this review");
     }
 
     await review.deleteOne();
-    res
-      .status(200)
-      .json({ success: true, message: "Review deleted successfully" });
-  } catch (error) {
-    next(error);
+
+    return sendSuccess(res, 200, null, {
+      message: "Review deleted successfully",
+    });
+  } catch (err) {
+    next(err);
   }
 };

@@ -6,40 +6,29 @@ const { validateListing } = require("../utils/validators");
 
 const router = express.Router();
 
-/* ----------------------------- Validation Handler ----------------------------- */
-const handleValidation = (req, res, next) => {
+/* 🔹 Validation */
+const validate = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({
       success: false,
-      message: "Data validation failed",
       errors: errors.array(),
     });
   }
   next();
 };
 
-/* ----------------------------- Listing Routes ----------------------------- */
-
-// General routes
 router
   .route("/")
   .get(listingController.getAllListings)
-  .post(
-    auth,
-    validateListing,
-    handleValidation,
-    listingController.createListing,
-  );
+  .post(auth, validateListing, validate, listingController.createListing);
 
-// User-specific routes
-router.route("/my-listings").get(auth, listingController.getMyListings);
+router.get("/my-listings", auth, listingController.getMyListings);
 
-// ID-specific routes
 router
   .route("/:id")
   .get(listingController.getListingById)
-  .put(auth, validateListing, handleValidation, listingController.updateListing)
+  .put(auth, validateListing, validate, listingController.updateListing)
   .delete(auth, listingController.deleteListing);
 
 module.exports = router;

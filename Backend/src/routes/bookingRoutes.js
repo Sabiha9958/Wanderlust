@@ -6,24 +6,33 @@ const { validateBooking } = require("../utils/validators");
 
 const router = express.Router();
 
-// Create booking (with validation + auth)
-router.post("/", auth, validateBooking, (req, res, next) => {
+/* 🔹 Validation Middleware */
+const validate = (req, res, next) => {
   const errors = validationResult(req);
-  if (!errors.isEmpty())
-    return res.status(400).json({ success: false, errors: errors.array() });
-  bookingController.createBooking(req, res, next);
-});
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      success: false,
+      errors: errors.array(),
+    });
+  }
+  next();
+};
 
-// Get all bookings
-router.get("/", bookingController.getAllBookings);
+/* 🔹 Routes */
+router
+  .route("/")
+  .post(auth, validateBooking, validate, bookingController.createBooking)
+  .get(bookingController.getAllBookings);
 
-// Get booking by ID
-router.get("/:id", bookingController.getBookingById);
+router
+  .route("/:id")
+  .get(bookingController.getBookingById)
+  .put(auth, bookingController.updateBooking);
 
-// Update booking (auth required)
-router.put("/:id", auth, bookingController.updateBooking);
+/* 🔹 Payment Route (FIXED) */
+router.patch("/:id/pay", auth, bookingController.updatePayment);
 
-// Cancel booking (auth required)
+/* 🔹 Cancel Route */
 router.patch("/:id/cancel", auth, bookingController.cancelBooking);
 
 module.exports = router;

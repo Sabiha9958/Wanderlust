@@ -1,10 +1,13 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { AnimatePresence } from "framer-motion";
+import PageTransition from "./components/PageTransition";
 import { AuthProvider } from "./context/AuthContext";
+
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import ProtectedRoute from "./components/ProtectedRoute";
 
-/* PUBLIC PAGES */
+/* Public Pages */
 import Home from "./pages/public/Home";
 import Listings from "./pages/public/PublicListings";
 import ListingDetail from "./pages/public/ListingDetail";
@@ -16,104 +19,154 @@ import About from "./pages/public/About";
 import Careers from "./pages/public/Careers";
 import Community from "./pages/public/Community";
 
-/* USER PAGES */
+/* User Pages */
 import Profile from "./pages/user/Profile";
 import BookingDetail from "./pages/user/BookingDetail";
 import CreateListingPage from "./pages/user/CreateListingPage";
 import MyListings from "./pages/user/MyListings";
 import MyBookings from "./pages/user/MyBookings";
 
-/* ADMIN PAGES */
+/* Payment */
+import PaymentPage from "./pages/payment/PaymentPage";
+
+/* Admin */
 import { AdminRoutes } from "./pages/admin/AdminRoutes";
 
-/* SHARED */
+/* Shared */
 import NotFound from "./pages/shared/NotFound";
 import Unauthorized from "./pages/shared/Unauthorized";
 
-function App() {
+/* ---------------- WRAPPERS ---------------- */
+
+const Private = ({ children }) => <ProtectedRoute>{children}</ProtectedRoute>;
+
+const AdminOnly = ({ children }) => (
+  <ProtectedRoute allowedRoles={["admin"]}>{children}</ProtectedRoute>
+);
+
+/* ---------------- ROUTE CONFIG ---------------- */
+
+const routes = [
+  /* Public */
+  { path: "/", element: <Home />, type: "fade" },
+  { path: "/listings", element: <Listings />, type: "slideUp" },
+  { path: "/listing/:id", element: <ListingDetail />, type: "slideLeft" },
+  { path: "/login", element: <Login />, type: "scale" },
+  { path: "/register", element: <Register />, type: "rotate" },
+
+  { path: "/help", element: <Help />, type: "fade" },
+  { path: "/safety", element: <Safety />, type: "fade" },
+  { path: "/about", element: <About />, type: "fade" },
+  { path: "/careers", element: <Careers />, type: "fade" },
+  { path: "/community", element: <Community />, type: "fade" },
+
+  { path: "/unauthorized", element: <Unauthorized />, type: "fade" },
+
+  /* User */
+  {
+    path: "/profile",
+    element: <Profile />,
+    private: true,
+    type: "slideUp",
+  },
+  {
+    path: "/booking/:id",
+    element: <BookingDetail />,
+    private: true,
+    type: "slideLeft",
+  },
+  {
+    path: "/create-listing",
+    element: <CreateListingPage />,
+    private: true,
+    type: "scale",
+  },
+  {
+    path: "/my-listings",
+    element: <MyListings />,
+    private: true,
+    type: "slideUp",
+  },
+  {
+    path: "/my-bookings",
+    element: <MyBookings />,
+    private: true,
+    type: "slideUp",
+  },
+
+  /* Payment */
+  {
+    path: "/payment",
+    element: <PaymentPage />,
+    private: true,
+    type: "scale",
+  },
+
+  /* Admin */
+  {
+    path: "/admin/*",
+    element: <AdminRoutes />,
+    admin: true,
+    type: "slideLeft",
+  },
+];
+
+/* ---------------- APP CONTENT ---------------- */
+
+function AppContent() {
+  const location = useLocation();
+
+  const renderRoute = (route) => {
+    let element = (
+      <PageTransition type={route.type}>{route.element}</PageTransition>
+    );
+
+    if (route.private) {
+      element = <Private>{element}</Private>;
+    }
+
+    if (route.admin) {
+      element = <AdminOnly>{element}</AdminOnly>;
+    }
+
+    return <Route key={route.path} path={route.path} element={element} />;
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col bg-slate-50 text-gray-900">
+      <Navbar />
+
+      <main className="flex-1 w-full">
+        <AnimatePresence mode="wait">
+          <Routes location={location} key={location.pathname}>
+            {routes.map(renderRoute)}
+
+            {/* 404 */}
+            <Route
+              path="*"
+              element={
+                <PageTransition type="fade">
+                  <NotFound />
+                </PageTransition>
+              }
+            />
+          </Routes>
+        </AnimatePresence>
+      </main>
+
+      <Footer />
+    </div>
+  );
+}
+
+/* ---------------- ROOT ---------------- */
+
+export default function AppWrapper() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <div className="min-h-screen flex flex-col bg-slate-50 font-sans text-gray-900">
-          <Navbar />
-
-          <main className="flex-1 w-full">
-            <Routes>
-              {/* ---------------- PUBLIC ROUTES ---------------- */}
-              <Route path="/" element={<Home />} />
-              <Route path="/listings" element={<Listings />} />
-              <Route path="/listing/:id" element={<ListingDetail />} />
-              <Route path="/login" element={<Login />} />
-              <Route path="/register" element={<Register />} />
-              <Route path="/help" element={<Help />} />
-              <Route path="/safety" element={<Safety />} />
-              <Route path="/about" element={<About />} />
-              <Route path="/careers" element={<Careers />} />
-              <Route path="/community" element={<Community />} />
-              <Route path="/unauthorized" element={<Unauthorized />} />
-
-              {/* ---------------- USER ROUTES ---------------- */}
-              <Route
-                path="/profile"
-                element={
-                  <ProtectedRoute>
-                    <Profile />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/booking-detail/:id"
-                element={
-                  <ProtectedRoute>
-                    <BookingDetail />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/create-listing"
-                element={
-                  <ProtectedRoute>
-                    <CreateListingPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/my-listings"
-                element={
-                  <ProtectedRoute>
-                    <MyListings />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/my-bookings"
-                element={
-                  <ProtectedRoute>
-                    <MyBookings />
-                  </ProtectedRoute>
-                }
-              />
-
-              {/* ---------------- ADMIN ROUTES ---------------- */}
-              <Route
-                path="/admin/*"
-                element={
-                  <ProtectedRoute allowedRoles={["admin"]}>
-                    <AdminRoutes />
-                  </ProtectedRoute>
-                }
-              />
-
-              {/* ---------------- 404 ROUTE ---------------- */}
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </main>
-
-          <Footer />
-        </div>
+        <AppContent />
       </BrowserRouter>
     </AuthProvider>
   );
 }
-
-export default App;

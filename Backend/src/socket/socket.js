@@ -5,16 +5,16 @@ let io;
 const initSocket = (server) => {
   io = new Server(server, {
     cors: {
-      origin: "*", // change to frontend URL in production
+      origin: process.env.CLIENT_URL || "*",
       methods: ["GET", "POST"],
     },
   });
 
   io.on("connection", (socket) => {
-    console.log("✅ Client connected:", socket.id);
+    console.log(`🔌 Connected: ${socket.id}`);
 
     socket.on("disconnect", () => {
-      console.log("❌ Client disconnected:", socket.id);
+      console.log(`❌ Disconnected: ${socket.id}`);
     });
   });
 

@@ -1,16 +1,13 @@
 const morgan = require("morgan");
 
-// Custom format for production logs
-const prodFormat =
-  ":remote-addr - :method :url :status :res[content-length] - :response-time ms";
+const isDev = process.env.NODE_ENV === "development";
 
-// Logger configuration
 const logger = morgan(
-  process.env.NODE_ENV === "development" ? "dev" : prodFormat,
+  isDev
+    ? "dev"
+    : ":remote-addr - :method :url :status :res[content-length] - :response-time ms",
   {
-    skip: (req, res) =>
-      process.env.NODE_ENV === "production" && res.statusCode < 400,
-    // In production, skip successful requests (only log errors)
+    skip: (req, res) => !isDev && res.statusCode < 400,
   },
 );
 

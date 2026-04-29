@@ -1,38 +1,47 @@
 const User = require("../models/User");
 const jwt = require("jsonwebtoken");
-const bcrypt = require("bcryptjs");
 
-const generateToken = (user, days = 14) =>
+/* 🔹 Generate JWT */
+const generateToken = (user, expires = "14d") =>
   jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
-    expiresIn: `${days}d`,
+    expiresIn: expires,
   });
 
-// Register
+/* 🔹 Common response formatter */
+const formatUser = (user) => ({
+  id: user._id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+});
+
+/* ---------------- REGISTER ---------------- */
 exports.registerUser = async (req, res, next) => {
   try {
-    const { name, email, password, role } = req.body;
+    let { name, email, password, role } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({
         success: false,
-        message: "All fields are required",
+        message: "Name, email and password are required",
       });
     }
 
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
+    email = email.toLowerCase().trim();
+
+    const exists = await User.exists({ email });
+    if (exists) {
       return res.status(400).json({
         success: false,
         message: "User already exists",
       });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-
+    // ❗ DO NOT hash here (model already does it)
     const user = await User.create({
-      name,
+      name: name.trim(),
       email,
-      password: hashedPassword,
+      password,
       role: role || "user",
     });
 
@@ -42,23 +51,17 @@ exports.registerUser = async (req, res, next) => {
       success: true,
       message: "User registered successfully",
       token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
+      user: formatUser(user),
     });
-  } catch (error) {
-    console.error("Register error:", error);
-    next(error);
+  } catch (err) {
+    next(err);
   }
 };
 
-// Login
+/* ---------------- LOGIN ---------------- */
 exports.loginUser = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    let { email, password } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({
@@ -67,7 +70,10 @@ exports.loginUser = async (req, res, next) => {
       });
     }
 
+    email = email.toLowerCase().trim();
+
     const user = await User.findOne({ email }).select("+password");
+
     if (!user) {
       return res.status(400).json({
         success: false,
@@ -75,7 +81,8 @@ exports.loginUser = async (req, res, next) => {
       });
     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
+    const isMatch = await user.comparePassword(password);
+
     if (!isMatch) {
       return res.status(400).json({
         success: false,
@@ -88,42 +95,30 @@ exports.loginUser = async (req, res, next) => {
 
     const token = generateToken(user);
 
-    res.status(200).json({
+    res.json({
       success: true,
       message: "Login successful",
       token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
+      user: formatUser(user),
     });
-  } catch (error) {
-    console.error("Login error:", error);
-    next(error);
+  } catch (err) {
+    next(err);
   }
 };
 
-// Logout
+/* ---------------- LOGOUT ---------------- */
 exports.logoutUser = async (req, res) => {
-  res.status(200).json({
+  // For JWT (stateless), logout is handled client-side
+  res.json({
     success: true,
     message: "Logged out successfully",
   });
 };
 
-// Get current user
+/* ---------------- GET ME ---------------- */
 exports.getMe = async (req, res, next) => {
   try {
-    if (!req.user?.id) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized",
-      });
-    }
-
-    const user = await User.findById(req.user.id).select("-password");
+    const user = await User.findById(req.user.id).select("-password").lean();
 
     if (!user) {
       return res.status(404).json({
@@ -132,12 +127,11 @@ exports.getMe = async (req, res, next) => {
       });
     }
 
-    res.status(200).json({
+    res.json({
       success: true,
       user,
     });
-  } catch (error) {
-    console.error("GetMe error:", error);
-    next(error);
+  } catch (err) {
+    next(err);
   }
 };

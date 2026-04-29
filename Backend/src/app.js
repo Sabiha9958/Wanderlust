@@ -4,7 +4,7 @@ const cors = require("cors");
 const logger = require("./utils/logger");
 const errorMiddleware = require("./middleware/errorMiddleware");
 
-// Route modules
+// Routes
 const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
 const listingRoutes = require("./routes/listingRoutes");
@@ -13,30 +13,61 @@ const reviewRoutes = require("./routes/reviewRoutes");
 
 const app = express();
 
-// -------------------- Middleware --------------------
-app.use(cors()); // Enable CORS for cross-origin requests
-app.use(express.json()); // Parse JSON bodies
-app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
-app.use(logger); // Custom request logger
-app.disable("etag"); // Disable caching headers for fresh responses
+/* -------------------- Core Middleware -------------------- */
 
-// -------------------- Routes --------------------
+// CORS (restrict in production)
+app.use(
+  cors({
+    origin: process.env.CLIENT_URL || "*",
+    credentials: true,
+  }),
+);
+
+// Body parsers (limit added for security)
+app.use(express.json({ limit: "10kb" }));
+app.use(express.urlencoded({ extended: true, limit: "10kb" }));
+
+// Logger
+app.use(logger);
+
+// Disable ETag (optional)
+app.disable("etag");
+
+/* -------------------- Routes -------------------- */
+
+// Root
 app.get("/", (req, res) => {
-  res.status(200).send("🌍 Wanderlust backend is running");
+  res.json({
+    success: true,
+    message: "🌍 Wanderlust API running",
+  });
 });
 
+// API Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/listings", listingRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/reviews", reviewRoutes);
 
-// -------------------- Health Check --------------------
+// Health check
 app.get("/health", (req, res) => {
-  res.status(200).json({ success: true, message: "API is healthy 🚀" });
+  res.json({
+    success: true,
+    status: "OK",
+    uptime: process.uptime(),
+  });
 });
 
-// -------------------- Error Handler --------------------
+/* -------------------- 404 Handler -------------------- */
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Route not found: ${req.originalUrl}`,
+  });
+});
+
+/* -------------------- Global Error Handler -------------------- */
 app.use(errorMiddleware);
 
 module.exports = app;

@@ -49,7 +49,9 @@ const ReviewCard = ({ review, onDelete }) => (
   <div className="p-4 border border-gray-100 rounded-xl bg-white shadow-sm hover:shadow-md transition-shadow">
     <div className="flex justify-between items-start mb-2">
       <div>
-        <p className="font-semibold text-sm text-gray-900">{review.userName}</p>
+        <p className="font-semibold text-sm text-gray-900">
+          {review.user?.name || review.userName || "Anonymous Guest"}
+        </p>
         <p className="text-xs text-gray-500">
           {new Date(review.createdAt).toLocaleDateString()}
         </p>
@@ -98,13 +100,21 @@ export default function AdminListingDetail() {
   });
 
   // Data Fetching
-  const fetchListing = useCallback(async () => {
+  const fetchListingAndReviews = useCallback(async () => {
     try {
       setStatus("loading");
-      const { data } = await api.get(`/listings/${id}`);
-      const l = data.data;
-      setListing(l);
 
+      // Parallel API calls for better performance
+      const [listingRes, reviewsRes] = await Promise.all([
+        api.get(`/listings/${id}`),
+        api.get(`/reviews/listing/${id}`),
+      ]);
+
+      const l = listingRes.data.data;
+      setListing(l);
+      setReviews(reviewsRes.data?.data || []);
+
+      // Populate edit form
       setForm({
         title: l.title || "",
         price: l.price || "",
@@ -121,27 +131,19 @@ export default function AdminListingDetail() {
         isAvailable: l.isAvailable ?? true,
         featured: l.featured ?? false,
       });
-      setStatus("success");
-    } catch {
-      setStatus("error");
-    }
-  }, [id]);
 
-  const fetchReviews = useCallback(async () => {
-    try {
-      const { data } = await api.get(`/reviews/${id}`);
-      setReviews(data.data || []);
-    } catch {
-      setReviews([]);
+      setStatus("success");
+    } catch (err) {
+      console.error("Fetch error:", err);
+      setStatus("error");
     }
   }, [id]);
 
   useEffect(() => {
     if (id) {
-      fetchListing();
-      fetchReviews();
+      fetchListingAndReviews();
     }
-  }, [id, fetchListing, fetchReviews]);
+  }, [id, fetchListingAndReviews]);
 
   // Actions
   const handleDeleteListing = async () => {
@@ -151,6 +153,7 @@ export default function AdminListingDetail() {
       )
     )
       return;
+
     try {
       await api.delete(`/listings/${id}`);
       navigate("/admin/listings");
@@ -164,7 +167,7 @@ export default function AdminListingDetail() {
     setIsSaving(true);
 
     try {
-      // Clean and cast the payload to prevent 400 Bad Request errors from strict DB validators
+      // Clean and cast payload
       const payload = {
         title: form.title.trim(),
         price: form.price ? Number(form.price) : undefined,
@@ -188,7 +191,7 @@ export default function AdminListingDetail() {
             : form.amenities,
       };
 
-      // Strip keys that resulted in NaN or undefined to safely patch data
+      // Strip undefined keys
       Object.keys(payload).forEach(
         (key) => payload[key] === undefined && delete payload[key],
       );
@@ -198,14 +201,12 @@ export default function AdminListingDetail() {
         images: listing.images,
         location: listing.location,
       });
+
       setEditMode(false);
-      fetchListing(); // Refresh to get normalized data from DB
+      fetchListingAndReviews(); // Refresh normalized DB data
     } catch (err) {
       console.error(err);
-      alert(
-        err.response?.data?.message ||
-          "Failed to update listing. Please check the values.",
-      );
+      alert(err.response?.data?.message || "Failed to update listing.");
     } finally {
       setIsSaving(false);
     }
@@ -215,8 +216,10 @@ export default function AdminListingDetail() {
     if (!window.confirm("Delete this review?")) return;
     try {
       await api.delete(`/reviews/${reviewId}`);
-      fetchReviews();
+      // Optimistic UI update instead of refetching everything
+      setReviews((prev) => prev.filter((r) => r._id !== reviewId));
     } catch (err) {
+      console.error("Delete review error:", err);
       alert("Failed to delete review.");
     }
   };
@@ -262,7 +265,9 @@ export default function AdminListingDetail() {
           <h1 className="text-2xl font-bold text-gray-900 line-clamp-1">
             {listing.title}
           </h1>
-          <p className="text-sm text-gray-500">ID: {listing.listingId}</p>
+          <p className="text-sm text-gray-500">
+            ID: {listing.listingId || listing._id}
+          </p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -284,7 +289,6 @@ export default function AdminListingDetail() {
       <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* LEFT COLUMN: Data & Form */}
         <div className="lg:col-span-2 space-y-8">
-          {/* INFO / EDIT SECTION */}
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
             <h2 className="text-lg font-bold text-gray-900 mb-5 border-b pb-3">
               Property Details
@@ -323,7 +327,6 @@ export default function AdminListingDetail() {
                       setForm({ ...form, serviceFee: e.target.value })
                     }
                   />
-
                   <InputField
                     label="Type (e.g. apartment)"
                     value={form.propertyType}
@@ -346,7 +349,6 @@ export default function AdminListingDetail() {
                       setForm({ ...form, maxGuests: e.target.value })
                     }
                   />
-
                   <InputField
                     label="Bedrooms"
                     type="number"
@@ -441,7 +443,10 @@ export default function AdminListingDetail() {
                   value={listing.propertyType}
                 />
                 <DetailItem label="Category" value={listing.category} />
-                <DetailItem label="Host" value={listing.hostName} />
+                <DetailItem
+                  label="Host"
+                  value={listing.host?.name || listing.hostName}
+                />
 
                 <DetailItem
                   label="Price"
@@ -463,7 +468,7 @@ export default function AdminListingDetail() {
                 <DetailItem label="Max Guests" value={listing.maxGuests} />
                 <DetailItem
                   label="Location"
-                  value={`${listing.location?.city}, ${listing.location?.state}`}
+                  value={`${listing.location?.city || "-"}, ${listing.location?.state || "-"}`}
                   colSpan={2}
                 />
 
@@ -549,7 +554,6 @@ export default function AdminListingDetail() {
                 </span>
               </div>
             </div>
-
             <div className="mt-6 text-xs text-gray-400 space-y-1">
               <p>Created: {new Date(listing.createdAt).toLocaleString()}</p>
               <p>Updated: {new Date(listing.updatedAt).toLocaleString()}</p>

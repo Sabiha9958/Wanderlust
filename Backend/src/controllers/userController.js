@@ -3,29 +3,18 @@ const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
 const { getIO } = require("../socket/socket");
 
-/* ---------- Helpers ---------- */
+/* 🔹 Helpers */
+const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
-// Remove sensitive information before sending to client
 const sanitizeUser = (user) => {
   if (!user) return null;
   const { password, ...rest } = user;
   return rest;
 };
 
-// Validate Mongo ID
-const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
-
-/* ---------- User Controllers (Self-Management) ---------- */
-
-// GET /api/users/me
+/* 🔹 Get Me */
 exports.getMe = async (req, res, next) => {
   try {
-    if (!isValidId(req.user.id)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid user ID" });
-    }
-
     const user = await User.findById(req.user.id).lean();
 
     if (!user || user.isDeleted) {
@@ -34,27 +23,21 @@ exports.getMe = async (req, res, next) => {
         .json({ success: false, message: "User not found" });
     }
 
-    res.status(200).json({
-      success: true,
-      data: sanitizeUser(user),
-    });
-  } catch (error) {
-    next(error);
+    res.json({ success: true, data: sanitizeUser(user) });
+  } catch (err) {
+    next(err);
   }
 };
 
-// PUT /api/users/me
+/* 🔹 Update Me */
 exports.updateMe = async (req, res, next) => {
   try {
-    const userId = req.user.id;
-
-    // Prevent users from escalating their own privileges
-    const { role, isDeleted, password, ...allowedUpdates } = req.body;
+    const { role, isDeleted, password, ...updates } = req.body;
 
     const user = await User.findOneAndUpdate(
-      { _id: userId, isDeleted: false },
-      allowedUpdates,
-      { returnDocument: "after", runValidators: true },
+      { _id: req.user.id, isDeleted: false },
+      updates,
+      { new: true, runValidators: true },
     ).lean();
 
     if (!user) {
@@ -63,29 +46,24 @@ exports.updateMe = async (req, res, next) => {
         .json({ success: false, message: "User not found" });
     }
 
-    res.status(200).json({
-      success: true,
-      data: sanitizeUser(user),
-    });
-  } catch (error) {
-    next(error);
+    res.json({ success: true, data: sanitizeUser(user) });
+  } catch (err) {
+    next(err);
   }
 };
 
-// DELETE /api/users/me
+/* 🔹 Delete Me (Soft) */
 exports.deleteMe = async (req, res, next) => {
   try {
-    const userId = req.user.id;
-
     const user = await User.findOneAndUpdate(
-      { _id: userId, isDeleted: false },
+      { _id: req.user.id, isDeleted: false },
       {
         isDeleted: true,
         deletedAt: new Date(),
-        deletedBy: userId,
+        deletedBy: req.user.id,
       },
-      { returnDocument: "after" },
-    ).lean();
+      { new: true },
+    );
 
     if (!user) {
       return res
@@ -93,18 +71,13 @@ exports.deleteMe = async (req, res, next) => {
         .json({ success: false, message: "User not found" });
     }
 
-    res.status(200).json({
-      success: true,
-      message: "Your account has been deleted.",
-    });
-  } catch (error) {
-    next(error);
+    res.json({ success: true, message: "Account deleted" });
+  } catch (err) {
+    next(err);
   }
 };
 
-/* ---------- Admin Controllers ---------- */
-
-// POST /api/users (admin)
+/* 🔹 Create User (Admin) */
 exports.createUser = async (req, res, next) => {
   try {
     const payload = { ...req.body };
@@ -115,51 +88,45 @@ exports.createUser = async (req, res, next) => {
 
     const user = await User.create(payload);
 
-    const io = getIO();
-    io.emit("dashboard:update", {
+    getIO().emit("dashboard:update", {
       type: "USER_CREATED",
       data: user,
     });
 
-    return res.status(201).json({
+    res.status(201).json({
       success: true,
-      message: "User created successfully",
       data: sanitizeUser(user.toObject()),
     });
-  } catch (error) {
-    console.error("User creation error:", error.message);
-    next(error);
+  } catch (err) {
+    next(err);
   }
 };
 
-// GET /api/users
+/* 🔹 Get All */
 exports.getAllUsers = async (req, res, next) => {
   try {
     const users = await User.find({ isDeleted: false })
       .sort({ createdAt: -1 })
       .lean();
 
-    res.status(200).json({
+    res.json({
       success: true,
+      count: users.length,
       data: users.map(sanitizeUser),
     });
-  } catch (error) {
-    next(error);
+  } catch (err) {
+    next(err);
   }
 };
 
-// GET /api/users/:id
+/* 🔹 Get One */
 exports.getUserById = async (req, res, next) => {
   try {
-    const { id } = req.params;
-
-    if (!isValidId(id)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid ID format" });
+    if (!isValidId(req.params.id)) {
+      return res.status(400).json({ success: false, message: "Invalid ID" });
     }
 
-    const user = await User.findById(id).lean();
+    const user = await User.findById(req.params.id).lean();
 
     if (!user || user.isDeleted) {
       return res
@@ -167,24 +134,17 @@ exports.getUserById = async (req, res, next) => {
         .json({ success: false, message: "User not found" });
     }
 
-    res.status(200).json({
-      success: true,
-      data: sanitizeUser(user),
-    });
-  } catch (error) {
-    next(error);
+    res.json({ success: true, data: sanitizeUser(user) });
+  } catch (err) {
+    next(err);
   }
 };
 
-// PUT /api/users/:id (admin)
+/* 🔹 Update User (Admin) */
 exports.updateUser = async (req, res, next) => {
   try {
-    const { id } = req.params;
-
-    if (!isValidId(id)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid ID format" });
+    if (!isValidId(req.params.id)) {
+      return res.status(400).json({ success: false, message: "Invalid ID" });
     }
 
     const updates = { ...req.body };
@@ -194,9 +154,9 @@ exports.updateUser = async (req, res, next) => {
     }
 
     const user = await User.findOneAndUpdate(
-      { _id: id, isDeleted: false },
+      { _id: req.params.id, isDeleted: false },
       updates,
-      { returnDocument: "after", runValidators: true },
+      { new: true, runValidators: true },
     ).lean();
 
     if (!user) {
@@ -205,41 +165,36 @@ exports.updateUser = async (req, res, next) => {
         .json({ success: false, message: "User not found" });
     }
 
-    res.status(200).json({
-      success: true,
-      data: sanitizeUser(user),
-    });
-  } catch (error) {
-    next(error);
+    res.json({ success: true, data: sanitizeUser(user) });
+  } catch (err) {
+    next(err);
   }
 };
 
-// DELETE /api/users/:id (admin)
+/* 🔹 Delete User */
 exports.deleteUser = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const hardDelete = req.query.hard === "true";
+    const hard = req.query.hard === "true";
 
     if (!isValidId(id)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid ID format" });
+      return res.status(400).json({ success: false, message: "Invalid ID" });
     }
 
     let user;
 
-    if (hardDelete) {
-      user = await User.findByIdAndDelete(id).lean();
+    if (hard) {
+      user = await User.findByIdAndDelete(id);
     } else {
       user = await User.findOneAndUpdate(
         { _id: id, isDeleted: false },
         {
           isDeleted: true,
           deletedAt: new Date(),
-          deletedBy: req.user?.id,
+          deletedBy: req.user.id,
         },
-        { returnDocument: "after" },
-      ).lean();
+        { new: true },
+      );
     }
 
     if (!user) {
@@ -248,13 +203,11 @@ exports.deleteUser = async (req, res, next) => {
         .json({ success: false, message: "User not found" });
     }
 
-    res.status(200).json({
+    res.json({
       success: true,
-      message: hardDelete
-        ? "User permanently deleted"
-        : "User soft deleted successfully",
+      message: hard ? "User permanently deleted" : "User soft deleted",
     });
-  } catch (error) {
-    next(error);
+  } catch (err) {
+    next(err);
   }
 };

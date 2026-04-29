@@ -2,276 +2,294 @@ const mongoose = require("mongoose");
 const Listing = require("../models/Listing");
 const { getIO } = require("../socket/socket");
 
-/* ----------------------------- Utility Responses ----------------------------- */
-const response = {
-  badRequest: (res, message) =>
-    res.status(400).json({ success: false, message }),
-  notFound: (res, message = "Listing not found") =>
-    res.status(404).json({ success: false, message }),
-  unauthorized: (res) =>
-    res.status(401).json({ success: false, message: "Unauthorized" }),
-  serverError: (res, error) => {
-    console.error("Server Error:", error.message || error);
-    res.status(500).json({ success: false, message: "Internal server error" });
-  },
+/* ---------------- HELPERS ---------------- */
+
+const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
+
+const toNumber = (val, fallback = 0) => {
+  const num = Number(val);
+  return Number.isFinite(num) ? num : fallback;
 };
 
-/* ------------------------------- Normalizers -------------------------------- */
-const normalizeNumber = (value, fallback = 0) => {
-  const num = Number(value);
-  return Number.isNaN(num) ? fallback : num;
-};
+const cleanString = (val) => (typeof val === "string" ? val.trim() : val);
 
-const normalizeImages = (images = []) => {
-  if (!Array.isArray(images)) return [];
-  return images.map((img, idx) => ({
-    filename: String(img?.filename || `image-${idx + 1}`).trim(),
-    url: String(img?.url || "").trim(),
-    caption: String(img?.caption || "").trim(),
-    isCover: Boolean(img?.isCover),
-  }));
-};
-
-const normalizeAmenities = (amenities = []) =>
-  Array.isArray(amenities)
-    ? [...new Set(amenities.map((item) => String(item).trim().toLowerCase()))]
+const cleanArray = (arr) =>
+  Array.isArray(arr)
+    ? [...new Set(arr.map((i) => i.trim().toLowerCase()).filter(Boolean))]
     : [];
 
-// FIX: Safely parse location and guarantee valid GeoJSON or nothing
-const buildLocation = (loc = {}) => {
-  const parsedLoc = {
-    city: String(loc.city || "").trim(),
-    area: String(loc.area || "").trim(),
-    state: String(loc.state || "").trim(),
-    country: String(loc.country || "").trim(),
-    addressLine: String(loc.addressLine || "").trim(),
-    pincode: String(loc.pincode || "").trim(),
-  };
-
-  // Extract coordinates safely whether it comes as [lng, lat] or { type, coordinates: [lng, lat] }
-  let coordsArray = null;
-  if (Array.isArray(loc.coordinates)) {
-    coordsArray = loc.coordinates;
-  } else if (Array.isArray(loc.coordinates?.coordinates)) {
-    coordsArray = loc.coordinates.coordinates;
-  }
-
-  // Only attach the coordinates object if we have exactly 2 valid numbers
-  if (coordsArray && coordsArray.length === 2) {
-    const lng = Number(coordsArray[0]);
-    const lat = Number(coordsArray[1]);
-
-    if (!Number.isNaN(lng) && !Number.isNaN(lat)) {
-      parsedLoc.coordinates = {
-        type: "Point",
-        coordinates: [lng, lat],
-      };
-    }
-  }
-
-  return parsedLoc;
-};
-
-/* ------------------------------- Controllers -------------------------------- */
-
-exports.createListing = async (req, res) => {
-  if (!req.user?.id) return response.unauthorized(res);
-
+/* =========================================================
+   CREATE LISTING
+========================================================= */
+exports.createListing = async (req, res, next) => {
   try {
-    const payload = {
-      title: req.body.title.trim(),
-      description: (req.body.description || "").trim(),
-      propertyType: req.body.propertyType || "apartment",
-      category: req.body.category || "standard",
-      price: normalizeNumber(req.body.price),
-      cleaningFee: normalizeNumber(req.body.cleaningFee, 0),
-      serviceFee: normalizeNumber(req.body.serviceFee, 0),
-      bedrooms: normalizeNumber(req.body.bedrooms, 1),
-      bathrooms: normalizeNumber(req.body.bathrooms, 1),
-      beds: normalizeNumber(req.body.beds, 1),
-      maxGuests: normalizeNumber(req.body.maxGuests, 1),
-      amenities: normalizeAmenities(req.body.amenities),
-      images: normalizeImages(req.body.images),
-      location: buildLocation(req.body.location),
-      host: req.user.id,
-      isAvailable: req.body.isAvailable ?? true,
-      featured: req.body.featured ?? false,
-    };
+    const user = req.user;
 
-    const listing = await Listing.create(payload);
+    if (!user?.id) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
 
-    const io = getIO();
-    io.emit("dashboard:update", {
+    const listing = await Listing.create({
+      ...req.body,
+
+      /* SECURITY: force server-side values */
+      host: user.id,
+      hostName: user.name || "",
+
+      /* sanitize critical fields */
+      title: cleanString(req.body.title),
+      description: cleanString(req.body.description),
+
+      amenities: cleanArray(req.body.amenities),
+
+      /* safe numeric casting */
+      price: toNumber(req.body.price),
+      cleaningFee: toNumber(req.body.cleaningFee),
+      serviceFee: toNumber(req.body.serviceFee),
+      maxGuests: toNumber(req.body.maxGuests),
+      bedrooms: toNumber(req.body.bedrooms),
+      bathrooms: toNumber(req.body.bathrooms),
+      beds: toNumber(req.body.beds),
+
+      /* IMPORTANT: prevent override */
+      listingId: undefined,
+      slug: undefined,
+    });
+
+    getIO()?.emit("dashboard:update", {
       type: "LISTING_CREATED",
       data: listing,
     });
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: "Listing created successfully",
       data: listing,
     });
   } catch (err) {
-    response.serverError(res, err);
+    next(err);
   }
 };
 
-exports.getMyListings = async (req, res) => {
-  if (!req.user?.id) return response.unauthorized(res);
-
-  try {
-    const listings = await Listing.find({ host: req.user.id })
-      .populate("host", "name email")
-      .sort({ createdAt: -1 })
-      .lean();
-
-    res
-      .status(200)
-      .json({ success: true, count: listings.length, data: listings });
-  } catch (err) {
-    response.serverError(res, err);
-  }
-};
-
-exports.getAllListings = async (req, res) => {
+/* =========================================================
+   GET ALL LISTINGS
+========================================================= */
+exports.getAllListings = async (req, res, next) => {
   try {
     const listings = await Listing.find()
       .populate("host", "name email")
       .sort({ createdAt: -1 })
       .lean();
 
-    res
-      .status(200)
-      .json({ success: true, count: listings.length, data: listings });
+    return res.json({
+      success: true,
+      count: listings.length,
+      data: listings,
+    });
   } catch (err) {
-    response.serverError(res, err);
+    next(err);
   }
 };
 
-exports.getListingById = async (req, res) => {
-  const { id } = req.params;
-  if (!mongoose.Types.ObjectId.isValid(id))
-    return response.badRequest(res, "Invalid listing ID format");
-
+/* =========================================================
+   GET SINGLE LISTING
+========================================================= */
+exports.getListingById = async (req, res, next) => {
   try {
+    const { id } = req.params;
+
+    if (!isValidId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid listing ID",
+      });
+    }
+
     const listing = await Listing.findById(id)
       .populate("host", "name email")
       .lean();
 
-    if (!listing) return response.notFound(res);
-
-    res.status(200).json({ success: true, data: listing });
-  } catch (err) {
-    response.serverError(res, err);
-  }
-};
-
-exports.updateListing = async (req, res) => {
-  if (!req.user?.id) return response.unauthorized(res);
-
-  const { id } = req.params;
-  if (!mongoose.Types.ObjectId.isValid(id))
-    return response.badRequest(res, "Invalid listing ID format");
-
-  try {
-    const existing = await Listing.findById(id);
-    if (!existing) return response.notFound(res);
-
-    // Verify ownership (optional but recommended for security)
-    if (existing.host.toString() !== req.user.id && req.user.role !== "admin") {
-      return res.status(403).json({
+    if (!listing) {
+      return res.status(404).json({
         success: false,
-        message: "Not authorized to update this listing",
+        message: "Listing not found",
       });
     }
 
-    const updateData = {
-      ...(req.body.title && { title: req.body.title.trim() }),
-      ...(req.body.description && { description: req.body.description.trim() }),
-      ...(req.body.propertyType && { propertyType: req.body.propertyType }),
-      ...(req.body.category && { category: req.body.category }),
-      ...(req.body.price != null && {
-        price: normalizeNumber(req.body.price, existing.price),
-      }),
-      ...(req.body.cleaningFee != null && {
-        cleaningFee: normalizeNumber(
-          req.body.cleaningFee,
-          existing.cleaningFee,
-        ),
-      }),
-      ...(req.body.serviceFee != null && {
-        serviceFee: normalizeNumber(req.body.serviceFee, existing.serviceFee),
-      }),
-      ...(req.body.bedrooms != null && {
-        bedrooms: normalizeNumber(req.body.bedrooms, existing.bedrooms),
-      }),
-      ...(req.body.bathrooms != null && {
-        bathrooms: normalizeNumber(req.body.bathrooms, existing.bathrooms),
-      }),
-      ...(req.body.beds != null && {
-        beds: normalizeNumber(req.body.beds, existing.beds),
-      }),
-      ...(req.body.maxGuests != null && {
-        maxGuests: normalizeNumber(req.body.maxGuests, existing.maxGuests),
-      }),
-      ...(Array.isArray(req.body.images) &&
-        req.body.images.length > 0 && {
-          images: normalizeImages(req.body.images),
-        }),
-      ...(req.body.amenities && {
-        amenities: normalizeAmenities(req.body.amenities),
-      }),
-      ...(req.body.isAvailable != null && {
-        isAvailable: Boolean(req.body.isAvailable),
-      }),
-      ...(req.body.featured != null && {
-        featured: Boolean(req.body.featured),
-      }),
-      ...(req.body.location && { location: buildLocation(req.body.location) }),
-    };
+    return res.json({
+      success: true,
+      data: listing,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
 
-    const updated = await Listing.findByIdAndUpdate(id, updateData, {
-      returnDocument: "after", // Fixed deprecation warning here
-      runValidators: true,
-    })
+/* =========================================================
+   MY LISTINGS
+========================================================= */
+exports.getMyListings = async (req, res, next) => {
+  try {
+    const user = req.user;
+
+    if (!user?.id) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    const listings = await Listing.find({ host: user.id })
+      .populate("host", "name email")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.json({
+      success: true,
+      count: listings.length,
+      data: listings,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/* =========================================================
+   UPDATE LISTING
+========================================================= */
+exports.updateListing = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const user = req.user;
+
+    if (!isValidId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid listing ID",
+      });
+    }
+
+    const listing = await Listing.findById(id);
+
+    if (!listing) {
+      return res.status(404).json({
+        success: false,
+        message: "Listing not found",
+      });
+    }
+
+    const isOwner =
+      listing.host.toString() === user.id || user.role === "admin";
+
+    if (!isOwner) {
+      return res.status(403).json({
+        success: false,
+        message: "Forbidden",
+      });
+    }
+
+    /* ---------------- SAFE UPDATE PAYLOAD ---------------- */
+    const updateData = { ...req.body };
+
+    // ❌ never allow overwriting system fields
+    delete updateData.slug;
+    delete updateData.listingId;
+    delete updateData.host;
+    delete updateData.hostName;
+
+    // normalize numbers
+    const numericFields = [
+      "price",
+      "cleaningFee",
+      "serviceFee",
+      "maxGuests",
+      "bedrooms",
+      "bathrooms",
+      "beds",
+    ];
+
+    numericFields.forEach((field) => {
+      if (updateData[field] !== undefined) {
+        updateData[field] = toNumber(updateData[field]);
+      }
+    });
+
+    // clean strings
+    if (updateData.title) updateData.title = cleanString(updateData.title);
+    if (updateData.description)
+      updateData.description = cleanString(updateData.description);
+
+    // clean arrays
+    if (updateData.amenities) {
+      updateData.amenities = cleanArray(updateData.amenities);
+    }
+
+    const updated = await Listing.findByIdAndUpdate(
+      id,
+      { $set: updateData },
+      {
+        new: true,
+        runValidators: true,
+        returnDocument: "after",
+      },
+    )
       .populate("host", "name email")
       .lean();
 
-    res.status(200).json({
+    return res.json({
       success: true,
       message: "Listing updated successfully",
       data: updated,
     });
   } catch (err) {
-    response.serverError(res, err);
+    next(err);
   }
 };
 
-exports.deleteListing = async (req, res) => {
-  if (!req.user?.id) return response.unauthorized(res);
-
-  const { id } = req.params;
-  if (!mongoose.Types.ObjectId.isValid(id))
-    return response.badRequest(res, "Invalid listing ID format");
-
+/* =========================================================
+   DELETE LISTING
+========================================================= */
+exports.deleteListing = async (req, res, next) => {
   try {
-    const listing = await Listing.findById(id);
-    if (!listing) return response.notFound(res);
+    const { id } = req.params;
+    const user = req.user;
 
-    // Verify ownership
-    if (listing.host.toString() !== req.user.id && req.user.role !== "admin") {
-      return res.status(403).json({
+    if (!isValidId(id)) {
+      return res.status(400).json({
         success: false,
-        message: "Not authorized to delete this listing",
+        message: "Invalid listing ID",
       });
     }
 
-    await Listing.findByIdAndDelete(id);
+    const listing = await Listing.findById(id);
 
-    res
-      .status(200)
-      .json({ success: true, message: "Listing deleted successfully" });
+    if (!listing) {
+      return res.status(404).json({
+        success: false,
+        message: "Listing not found",
+      });
+    }
+
+    const isOwner =
+      listing.host.toString() === user.id || user.role === "admin";
+
+    if (!isOwner) {
+      return res.status(403).json({
+        success: false,
+        message: "Forbidden",
+      });
+    }
+
+    await listing.deleteOne();
+
+    return res.json({
+      success: true,
+      message: "Listing deleted successfully",
+    });
   } catch (err) {
-    response.serverError(res, err);
+    next(err);
   }
 };

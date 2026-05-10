@@ -1,114 +1,363 @@
 import React, {
+  memo,
   useCallback,
   useContext,
   useEffect,
   useMemo,
   useState,
-  memo,
 } from "react";
+
+import {
+  Bath,
+  BedDouble,
+  Building2,
+  Edit3,
+  Eye,
+  Globe,
+  Heart,
+  MapPin,
+  Plus,
+  Star,
+  Trash2,
+  Users,
+  Wifi,
+} from "lucide-react";
+
 import api from "../../api/axiosInstance";
 import { AuthContext } from "../../context/AuthContext";
 import FormInput from "../../components/form/FormInput";
 
-// ---------------- HELPERS ----------------
+/* -------------------------------------------------------------------------- */
+/*                                   HELPERS                                  */
+/* -------------------------------------------------------------------------- */
 
-const isNonEmptyArray = (value) => Array.isArray(value) && value.length > 0;
+const formatCurrency = (value = 0) =>
+  `₹${Number(value).toLocaleString("en-IN")}`;
 
-const normalizeText = (value) =>
-  typeof value === "string" ? value.trim() : "";
+const getCoverImage = (images = []) =>
+  images.find((img) => img?.isCover)?.url ||
+  images?.[0]?.url ||
+  "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?q=80&w=1200";
 
-const normalizeNumber = (value, { fallback = 1, min = 1 } = {}) => {
-  if (value === "" || value === null || value === undefined) return fallback;
-
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-
-  return Math.max(parsed, min);
+const amenityIcons = {
+  wifi: <Wifi size={14} />,
+  parking: "🚗",
+  kitchen: "🍽️",
+  ac: "❄️",
+  washer: "🧺",
+  balcony: "🌇",
+  garden: "🌿",
+  security: "🛡️",
 };
 
-const normalizeAmenities = (value) => {
-  if (!Array.isArray(value)) return [];
-
-  return [
-    ...new Set(
-      value.map((item) => normalizeText(item).toLowerCase()).filter(Boolean),
-    ),
-  ];
-};
-
-const normalizeImages = (value) => {
-  if (!Array.isArray(value)) return [];
-
-  return value.filter(Boolean);
-};
-
-const buildListingPayload = (formData, user) => ({
-  ...formData,
-  title: normalizeText(formData.title),
-  description: normalizeText(formData.description),
-  price: normalizeNumber(formData.price, { fallback: 100, min: 100 }),
-  cleaningFee: normalizeNumber(formData.cleaningFee, { fallback: 0, min: 0 }),
-  serviceFee: normalizeNumber(formData.serviceFee, { fallback: 0, min: 0 }),
-  bedrooms: normalizeNumber(formData.bedrooms, { fallback: 1, min: 1 }),
-  bathrooms: normalizeNumber(formData.bathrooms, { fallback: 1, min: 1 }),
-  beds: normalizeNumber(formData.beds, { fallback: 1, min: 1 }),
-  maxGuests: normalizeNumber(formData.maxGuests, { fallback: 1, min: 1 }),
-  amenities: normalizeAmenities(formData.amenities),
-  images: normalizeImages(formData.images),
-  host: user?._id || user?.id,
-  hostName: normalizeText(user?.name) || "Unknown Host",
-});
-
-// ---------------- CARD ----------------
+/* -------------------------------------------------------------------------- */
+/*                               LISTING CARD                                 */
+/* -------------------------------------------------------------------------- */
 
 const ListingCard = memo(({ listing, onEdit, onDelete, isDeleting }) => {
-  const priceLabel = useMemo(
-    () => `₹${Number(listing?.price || 0).toLocaleString("en-IN")}`,
-    [listing?.price],
+  const coverImage = useMemo(
+    () => getCoverImage(listing?.images),
+    [listing?.images],
   );
 
+  const location = useMemo(() => {
+    const city = listing?.location?.city || "";
+    const country = listing?.location?.country || "";
+
+    return [city, country].filter(Boolean).join(", ");
+  }, [listing]);
+
   return (
-    <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:shadow-md">
-      <div className="space-y-4 p-5">
-        <div className="flex items-start justify-between gap-3">
-          <h2
-            className="truncate text-lg font-bold text-gray-900"
-            title={listing?.title || "Untitled Listing"}
-          >
-            {listing?.title || "Untitled Listing"}
-          </h2>
+    <div
+      className="
+          group
+          overflow-hidden
+          rounded-[32px]
+          border
+          border-[#ECECEC]
+          bg-white
+          shadow-sm
+          transition-all
+          duration-300
+          hover:-translate-y-1
+          hover:shadow-2xl
+        "
+    >
+      {/* IMAGE */}
 
-          <span className="shrink-0 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-            {priceLabel}
-          </span>
+      <div className="relative h-[250px] overflow-hidden">
+        <img
+          src={coverImage}
+          alt={listing?.title}
+          className="
+              h-full
+              w-full
+              object-cover
+              transition-transform
+              duration-500
+              group-hover:scale-105
+            "
+        />
+
+        {/* OVERLAY */}
+
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
+
+        {/* PRICE */}
+
+        <div
+          className="
+              absolute
+              left-5
+              top-5
+              rounded-2xl
+              bg-white/95
+              px-4
+              py-2
+              shadow-lg
+              backdrop-blur-md
+            "
+        >
+          <p className="text-xs font-medium text-gray-500">Per Night</p>
+
+          <h3 className="text-lg font-bold text-gray-900">
+            {formatCurrency(listing?.price)}
+          </h3>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500">
-          <span>🛏️ {listing?.beds || 1} Beds</span>
-          <span>•</span>
-          <span>👥 {listing?.maxGuests || 1} Guests</span>
-          <span>•</span>
-          <span>🚿 {listing?.bathrooms || 1} Baths</span>
+        {/* FEATURED */}
+
+        {listing?.featured && (
+          <div
+            className="
+                absolute
+                right-5
+                top-5
+                rounded-full
+                bg-amber-400
+                px-3
+                py-1
+                text-xs
+                font-semibold
+                text-white
+                shadow-md
+              "
+          >
+            Featured
+          </div>
+        )}
+
+        {/* BOTTOM INFO */}
+
+        <div className="absolute bottom-5 left-5 right-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <span
+                className="
+                    rounded-full
+                    bg-white/15
+                    px-3
+                    py-1
+                    text-xs
+                    font-medium
+                    uppercase
+                    tracking-wide
+                    text-white
+                    backdrop-blur-md
+                  "
+              >
+                {listing?.propertyType}
+              </span>
+
+              <h2 className="mt-3 text-2xl font-bold text-white">
+                {listing?.title}
+              </h2>
+
+              <div className="mt-2 flex items-center gap-2 text-sm text-white/90">
+                <MapPin size={15} />
+
+                <span>{location}</span>
+              </div>
+            </div>
+
+            <button
+              className="
+                  flex
+                  h-12
+                  w-12
+                  items-center
+                  justify-center
+                  rounded-2xl
+                  bg-white/20
+                  text-white
+                  backdrop-blur-md
+                  transition
+                  hover:bg-white
+                  hover:text-gray-900
+                "
+            >
+              <Heart size={18} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* CONTENT */}
+
+      <div className="p-6">
+        {/* DESCRIPTION */}
+
+        <p className="line-clamp-2 text-sm leading-relaxed text-gray-600">
+          {listing?.description}
+        </p>
+
+        {/* STATS */}
+
+        <div
+          className="
+              mt-6
+              grid
+              grid-cols-4
+              gap-3
+              rounded-3xl
+              bg-[#FAFAFA]
+              p-4
+            "
+        >
+          <InfoBox
+            icon={<BedDouble size={16} />}
+            label="Beds"
+            value={listing?.beds || 1}
+          />
+
+          <InfoBox
+            icon={<Bath size={16} />}
+            label="Baths"
+            value={listing?.bathrooms || 1}
+          />
+
+          <InfoBox
+            icon={<Users size={16} />}
+            label="Guests"
+            value={listing?.maxGuests || 1}
+          />
+
+          <InfoBox
+            icon={<Building2 size={16} />}
+            label="Rooms"
+            value={listing?.bedrooms || 1}
+          />
         </div>
 
-        <div className="flex items-center justify-end gap-3 border-t border-gray-100 pt-4">
-          <button
-            type="button"
-            onClick={() => onEdit(listing)}
-            disabled={isDeleting}
-            className="text-sm font-medium text-blue-600 transition hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Edit
-          </button>
+        {/* AMENITIES */}
 
-          <button
-            type="button"
-            onClick={() => onDelete(listing._id)}
-            disabled={isDeleting}
-            className="text-sm font-medium text-red-600 transition hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isDeleting ? "Deleting..." : "Delete"}
-          </button>
+        <div className="mt-6">
+          <div className="flex flex-wrap gap-2">
+            {listing?.amenities?.slice(0, 5)?.map((item) => (
+              <div
+                key={item}
+                className="
+                    inline-flex
+                    items-center
+                    gap-2
+                    rounded-full
+                    border
+                    border-gray-200
+                    bg-white
+                    px-3
+                    py-2
+                    text-xs
+                    font-medium
+                    text-gray-700
+                  "
+              >
+                <span>{amenityIcons[item] || "✨"}</span>
+
+                <span className="capitalize">{item.replace("-", " ")}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* FOOTER */}
+
+        <div
+          className="
+              mt-6
+              flex
+              items-center
+              justify-between
+              border-t
+              border-gray-100
+              pt-5
+            "
+        >
+          {/* HOST */}
+
+          <div className="flex items-center gap-3">
+            <div
+              className="
+                  flex
+                  h-11
+                  w-11
+                  items-center
+                  justify-center
+                  rounded-2xl
+                  bg-blue-50
+                  text-sm
+                  font-bold
+                  text-blue-700
+                "
+            >
+              {listing?.hostName?.charAt(0)}
+            </div>
+
+            <div>
+              <p className="text-sm font-semibold text-gray-900">
+                {listing?.hostName}
+              </p>
+
+              <div className="flex items-center gap-1 text-xs text-gray-500">
+                <Star size={13} className="fill-amber-400 text-amber-400" />
+
+                <span>{listing?.rating || 0} Rating</span>
+              </div>
+            </div>
+          </div>
+
+          {/* ACTIONS */}
+
+          <div className="flex items-center gap-2">
+            <ActionButton>
+              <Eye size={16} />
+            </ActionButton>
+
+            <ActionButton onClick={() => onEdit(listing)}>
+              <Edit3 size={16} />
+            </ActionButton>
+
+            <button
+              type="button"
+              onClick={() => onDelete(listing?._id)}
+              disabled={isDeleting}
+              className="
+                  flex
+                  h-11
+                  w-11
+                  items-center
+                  justify-center
+                  rounded-2xl
+                  bg-red-50
+                  text-red-600
+                  transition
+                  hover:bg-red-600
+                  hover:text-white
+                  disabled:opacity-50
+                "
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -117,64 +366,47 @@ const ListingCard = memo(({ listing, onEdit, onDelete, isDeleting }) => {
 
 ListingCard.displayName = "ListingCard";
 
-// ---------------- MAIN COMPONENT ----------------
+/* -------------------------------------------------------------------------- */
+/*                                MAIN PAGE                                   */
+/* -------------------------------------------------------------------------- */
 
 const MyListings = () => {
   const { user, token, loading: authLoading } = useContext(AuthContext);
 
   const [listings, setListings] = useState([]);
-  const [pageLoading, setPageLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState("");
-  const [submitError, setSubmitError] = useState("");
-  const [deletingId, setDeletingId] = useState(null);
-  const [submitBusy, setSubmitBusy] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentListing, setCurrentListing] = useState(null);
 
   const authHeaders = useMemo(
     () => ({
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
     }),
     [token],
   );
 
-  const openModal = useCallback((listing = null) => {
-    setCurrentListing(listing);
-    setSubmitError("");
-    setIsModalOpen(true);
-  }, []);
-
-  const closeModal = useCallback(() => {
-    if (submitBusy) return;
-    setCurrentListing(null);
-    setSubmitError("");
-    setIsModalOpen(false);
-  }, [submitBusy]);
+  /* ---------------------------------------------------------------------- */
+  /* FETCH                                                                  */
+  /* ---------------------------------------------------------------------- */
 
   const fetchListings = useCallback(async () => {
-    if (!token) return;
-
     try {
-      setPageLoading(true);
-      setPageError("");
+      setLoading(true);
 
       const { data } = await api.get("/listings/my-listings", authHeaders);
 
-      if (!data?.success) {
-        throw new Error(data?.message || "Failed to load listings");
-      }
-
-      setListings(Array.isArray(data.data) ? data.data : []);
+      setListings(data?.data || []);
     } catch (error) {
-      console.error("Fetch Listings Error:", error);
-      setPageError(
-        error.response?.data?.message ||
-          "Failed to load your listings. Please try again.",
-      );
+      console.error(error);
+
+      setPageError(error?.response?.data?.message || "Failed to load listings");
     } finally {
-      setPageLoading(false);
+      setLoading(false);
     }
-  }, [token, authHeaders]);
+  }, [authHeaders]);
 
   useEffect(() => {
     if (!authLoading && token) {
@@ -182,197 +414,287 @@ const MyListings = () => {
     }
   }, [authLoading, token, fetchListings]);
 
+  /* ---------------------------------------------------------------------- */
+  /* ACTIONS                                                                */
+  /* ---------------------------------------------------------------------- */
+
+  const openModal = useCallback((listing = null) => {
+    setCurrentListing(listing);
+    setIsModalOpen(true);
+  }, []);
+
+  const closeModal = useCallback(() => {
+    setCurrentListing(null);
+    setIsModalOpen(false);
+  }, []);
+
   const handleDelete = useCallback(
     async (id) => {
-      if (!id) return;
-
-      const confirmed = window.confirm(
-        "Are you sure you want to delete this listing?",
-      );
-
-      if (!confirmed) return;
+      if (!window.confirm("Delete this listing?")) {
+        return;
+      }
 
       try {
-        setDeletingId(id);
-
-        const { data } = await api.delete(`/listings/${id}`, authHeaders);
-
-        if (!data?.success) {
-          throw new Error(data?.message || "Delete failed");
-        }
+        await api.delete(`/listings/${id}`, authHeaders);
 
         setListings((prev) => prev.filter((item) => item._id !== id));
       } catch (error) {
-        console.error("Delete Listing Error:", error);
-        alert(
-          error.response?.data?.message ||
-            "Failed to delete the listing. Please try again.",
-        );
-      } finally {
-        setDeletingId(null);
+        console.error(error);
       }
     },
     [authHeaders],
   );
 
-  const handleFormSubmit = useCallback(
-    async (formData) => {
-      if (!user) {
-        throw new Error("User information is missing. Please log in again.");
-      }
+  /* ---------------------------------------------------------------------- */
+  /* LOADING                                                                */
+  /* ---------------------------------------------------------------------- */
 
-      try {
-        setSubmitBusy(true);
-        setSubmitError("");
-
-        const isEditMode = Boolean(currentListing?._id);
-        const payload = buildListingPayload(formData, user);
-
-        if (!payload.title) {
-          throw new Error("Title is required.");
-        }
-
-        if (!payload.description) {
-          throw new Error("Description is required.");
-        }
-
-        if (payload.beds < 1) {
-          throw new Error("Beds must be at least 1.");
-        }
-
-        const response = isEditMode
-          ? await api.put(
-              `/listings/${currentListing._id}`,
-              payload,
-              authHeaders,
-            )
-          : await api.post("/listings", payload, authHeaders);
-
-        const { data } = response;
-
-        if (!data?.success || !data?.data) {
-          throw new Error(data?.message || "Failed to save listing.");
-        }
-
-        setListings((prev) =>
-          isEditMode
-            ? prev.map((item) =>
-                item._id === data.data._id ? data.data : item,
-              )
-            : [data.data, ...prev],
-        );
-
-        closeModal();
-      } catch (error) {
-        console.error("Submit Listing Error:", error);
-
-        const backendMessage =
-          error.response?.data?.message ||
-          error.response?.data?.error ||
-          error.message ||
-          "Failed to save listing.";
-
-        setSubmitError(backendMessage);
-        throw new Error(backendMessage);
-      } finally {
-        setSubmitBusy(false);
-      }
-    },
-    [user, currentListing, authHeaders, closeModal],
-  );
-
-  if (authLoading || pageLoading) {
+  if (loading || authLoading) {
     return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center text-gray-500">
-        <div className="mb-4 h-10 w-10 animate-spin rounded-full border-b-2 border-blue-600" />
-        <p>Loading your listings...</p>
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA]">
+        <div className="space-y-4 text-center">
+          <div
+            className="
+              mx-auto
+              h-12
+              w-12
+              animate-spin
+              rounded-full
+              border-4
+              border-gray-200
+              border-t-blue-600
+            "
+          />
+
+          <p className="text-gray-500">Loading Listings...</p>
+        </div>
       </div>
     );
   }
+
+  /* ---------------------------------------------------------------------- */
+  /* ERROR                                                                  */
+  /* ---------------------------------------------------------------------- */
 
   if (pageError) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-2xl bg-red-50 p-6 text-center text-red-700">
-          <p className="mb-4">{pageError}</p>
-          <button
-            type="button"
-            onClick={fetchListings}
-            className="rounded-lg bg-red-600 px-5 py-2 text-white transition hover:bg-red-700"
-          >
-            Try Again
-          </button>
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-6">
+        <div
+          className="
+            w-full
+            max-w-md
+            rounded-3xl
+            border
+            border-red-100
+            bg-white
+            p-8
+            text-center
+            shadow-sm
+          "
+        >
+          <h2 className="text-xl font-bold text-red-600">Failed to Load</h2>
+
+          <p className="mt-2 text-gray-500">{pageError}</p>
         </div>
       </div>
     );
   }
 
+  /* ---------------------------------------------------------------------- */
+  /* UI                                                                     */
+  /* ---------------------------------------------------------------------- */
+
   return (
-    <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+    <div className="min-h-screen bg-[#F7F7F7]">
+      <div className="mx-auto max-w-[1600px] px-6 py-10">
+        {/* HEADER */}
+
+        <div className="mb-10 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">My Listings</h1>
-            <p className="mt-1 text-gray-500">Manage your property portfolio</p>
+            <div
+              className="
+                inline-flex
+                items-center
+                gap-2
+                rounded-full
+                border
+                border-blue-100
+                bg-blue-50
+                px-4
+                py-2
+                text-sm
+                font-medium
+                text-blue-700
+              "
+            >
+              <Globe size={15} />
+              Property Management
+            </div>
+
+            <h1 className="mt-4 text-5xl font-bold tracking-tight text-gray-900">
+              My Listings
+            </h1>
+
+            <p className="mt-3 max-w-2xl text-lg text-gray-500">
+              Manage your properties, pricing, bookings, amenities, and
+              visibility in one modern dashboard experience.
+            </p>
           </div>
 
           <button
-            type="button"
             onClick={() => openModal()}
-            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-2.5 font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            className="
+              inline-flex
+              items-center
+              gap-3
+              rounded-2xl
+              bg-blue-600
+              px-7
+              py-4
+              font-semibold
+              text-white
+              shadow-lg
+              shadow-blue-500/20
+              transition-all
+              hover:-translate-y-0.5
+              hover:bg-blue-700
+            "
           >
-            <span className="text-lg leading-none">+</span>
-            New Listing
+            <Plus size={18} />
+            Create Listing
           </button>
         </div>
 
+        {/* EMPTY */}
+
         {listings.length === 0 ? (
-          <div className="rounded-2xl border border-gray-200 bg-white px-6 py-20 text-center">
-            <div className="mx-auto mb-4 text-5xl">🏡</div>
-            <h2 className="mb-2 text-xl font-semibold text-gray-900">
-              No listings yet
+          <div
+            className="
+              rounded-[40px]
+              border
+              border-dashed
+              border-gray-300
+              bg-white
+              px-6
+              py-24
+              text-center
+            "
+          >
+            <div className="text-7xl">🏡</div>
+
+            <h2 className="mt-6 text-3xl font-bold text-gray-900">
+              No Listings Yet
             </h2>
-            <p className="mx-auto mb-6 max-w-sm text-gray-500">
-              You haven&apos;t added any properties yet. Create your first
-              listing to get started.
+
+            <p className="mx-auto mt-3 max-w-md text-gray-500">
+              Start growing your rental business by adding your first premium
+              property listing.
             </p>
+
             <button
-              type="button"
               onClick={() => openModal()}
-              className="rounded-xl bg-blue-600 px-6 py-2.5 font-medium text-white transition hover:bg-blue-700"
+              className="
+                mt-8
+                rounded-2xl
+                bg-blue-600
+                px-6
+                py-3
+                font-semibold
+                text-white
+                transition
+                hover:bg-blue-700
+              "
             >
-              Create First Listing
+              Add Your First Listing
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div
+            className="
+              grid
+              grid-cols-1
+              gap-8
+              md:grid-cols-2
+              2xl:grid-cols-3
+            "
+          >
             {listings.map((listing) => (
               <ListingCard
-                key={listing._id}
+                key={listing?._id}
                 listing={listing}
                 onEdit={openModal}
                 onDelete={handleDelete}
-                isDeleting={deletingId === listing._id}
               />
             ))}
           </div>
         )}
 
-        {isModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-            <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
-              {submitError && (
-                <div className="border-b border-red-100 bg-red-50 px-6 py-4 text-sm text-red-700">
-                  {submitError}
-                </div>
-              )}
+        {/* MODAL */}
 
+        {isModalOpen && (
+          <div
+            className="
+      fixed
+      inset-0
+      z-50
+      flex
+      items-center
+      justify-center
+      bg-black/50
+      p-5
+      backdrop-blur-md
+    "
+          >
+            <div
+              className="
+        max-h-[95vh]
+        w-full
+        max-w-5xl
+        overflow-y-auto
+        rounded-[32px]
+        bg-white
+        shadow-2xl
+      "
+            >
               <FormInput
                 initialData={currentListing}
                 isEditMode={Boolean(currentListing?._id)}
-                onSubmit={handleFormSubmit}
+                onSubmit={async (formData) => {
+                  try {
+                    if (currentListing?._id) {
+                      const response = await api.put(
+                        `/listings/${currentListing._id}`,
+                        formData,
+                        authHeaders,
+                      );
+
+                      const updatedListing = response?.data?.data;
+
+                      setListings((prev) =>
+                        prev.map((item) =>
+                          item._id === updatedListing._id
+                            ? updatedListing
+                            : item,
+                        ),
+                      );
+                    } else {
+                      const response = await api.post(
+                        "/listings",
+                        formData,
+                        authHeaders,
+                      );
+
+                      const newListing = response?.data?.data;
+
+                      setListings((prev) => [newListing, ...prev]);
+                    }
+
+                    closeModal();
+                  } catch (error) {
+                    console.error("Listing Submit Error:", error);
+                  }
+                }}
                 onCancel={closeModal}
-                isBusy={submitBusy}
               />
             </div>
           </div>
@@ -381,5 +703,44 @@ const MyListings = () => {
     </div>
   );
 };
+
+/* -------------------------------------------------------------------------- */
+/*                              SMALL COMPONENTS                              */
+/* -------------------------------------------------------------------------- */
+
+function InfoBox({ icon, label, value }) {
+  return (
+    <div className="text-center">
+      <div className="flex justify-center text-blue-600">{icon}</div>
+
+      <p className="mt-2 text-xs text-gray-500">{label}</p>
+
+      <h4 className="mt-1 text-sm font-bold text-gray-900">{value}</h4>
+    </div>
+  );
+}
+
+function ActionButton({ children, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="
+        flex
+        h-11
+        w-11
+        items-center
+        justify-center
+        rounded-2xl
+        bg-gray-100
+        text-gray-700
+        transition
+        hover:bg-blue-600
+        hover:text-white
+      "
+    >
+      {children}
+    </button>
+  );
+}
 
 export default MyListings;
